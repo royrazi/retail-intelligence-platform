@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Retail | דוח אנליזה וביצועי AI</title>
+    <style>
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; }
+        body { background: #0b1329; color: #f1f5f9; padding: 24px; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; }
+        .header h1 { font-size: 26px; color: #38bdf8; font-weight: 900; }
+        
+        .filter-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        select, .btn {
+            background: #1e293b; border: 1px solid #334155; color: #f8fafc; padding: 9px 14px;
+            border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; outline: none; transition: 0.2s;
+        }
+        .btn:hover { background: #334155; }
+        .btn-primary { background: #0284c7; color: #fff; border: none; }
+        .btn-primary:hover { background: #0369a1; }
+        .btn-telegram { background: #0ea5e9; color: #fff; border: none; font-weight: bold; }
+        .btn-telegram:hover { background: #0284c7; }
+        .btn-danger { background: #dc2626 !important; color: #ffffff !important; border: 1px solid #b91c1c !important; font-weight: bold; }
+        .btn-danger:hover { background: #b91c1c !important; }
+
+        /* קופסת מסקנות AI */
+        .ai-card {
+            background: linear-gradient(135deg, #1e1b4b, #0f172a);
+            border: 1px solid #6366f1; border-radius: 14px; padding: 22px; margin-bottom: 24px;
+            box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.2);
+        }
+        .ai-header { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; color: #c7d2fe; margin-bottom: 14px; }
+        .ai-item { background: rgba(255,255,255,0.04); padding: 12px 16px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; line-height: 1.6; border-right: 4px solid #818cf8; }
+
+        /* כרטיסי KPI */
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .kpi-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 18px; }
+        .kpi-card.highlight { background: linear-gradient(145deg, #1e293b, #14352a); border-color: #22c55e; }
+        .kpi-title { font-size: 13px; color: #94a3b8; font-weight: 600; margin-bottom: 6px; }
+        .kpi-value { font-size: 26px; font-weight: 900; color: #fff; }
+        .kpi-value.green { color: #4ade80; }
+        .kpi-value.blue { color: #38bdf8; }
+
+        /* טבלאות */
+        .section-title { font-size: 16px; font-weight: 800; color: #94a3b8; margin: 24px 0 12px 0; }
+        .table-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
+        .table-wrapper { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: right; }
+        th { background: #0f172a; color: #94a3b8; font-size: 12px; font-weight: 700; padding: 12px 16px; border-bottom: 1px solid #334155; }
+        td { padding: 12px 16px; border-bottom: 1px solid #334155; font-size: 13px; color: #e2e8f0; }
+        tr:hover td { background: #24334d; }
+
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; }
+        .badge-roas { background: #065f46; color: #6ee7b7; }
+        .badge-low { background: #7f1d1d; color: #fca5a5; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>📊 מנוע אנליזה ודוחות ביצועים</h1>
+                <p style="color: #94a3b8; font-size: 13px; margin-top: 4px;">ניתוח חודשי, ביצועי רבעונים וסנכרון Google Sheets</p>
+            </div>
+            <div class="filter-group">
+                <select id="periodFilter" onchange="loadReport()">
+                    <option value="2026-08" selected>חודש נוכחי (אוגוסט 2026)</option>
+                    <option value="2026-09">ספטמבר 2026</option>
+                    <option value="2026-07">יולי 2026</option>
+                    <option value="2026-Q3">📊 רבעון 3 (Q3 2026)</option>
+                    <option value="all">🌐 כל התקופות (מצטבר)</option>
+                </select>
+                <button class="btn" onclick="openSpendModal()">💰 הזן הוצאת פרסום</button>
+                <button class="btn btn-telegram" onclick="sendTelegramNow()">✈️ שלח דוח לטלגרם</button>
+                <button class="btn btn-danger" onclick="resetAllTestData()">🧹 נקה נתוני בדיקה</button>
+                <button class="btn btn-primary" onclick="loadReport()">🔄 רענן</button>
+            </div>
+        </div>
+
+        <!-- תובנות AI -->
+        <div class="ai-card">
+            <div class="ai-header">🤖 מסקנות והנחיות אסטרטגיות לתקופה הנבחרת</div>
+            <div id="aiDirectivesList">טוען ניתוח...</div>
+        </div>
+
+        <!-- סיכום מנהלים (KPIs) -->
+        <div class="kpi-grid">
+            <div class="kpi-card highlight">
+                <div class="kpi-title">רווח נקי סופי (לאחר פרסום)</div>
+                <div class="kpi-value green" id="kpiNetProfit">0 ₪</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">מחזור מכירות כולל</div>
+                <div class="kpi-value blue" id="kpiRevenue">0 ₪</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">עלויות סחורה + משלוח</div>
+                <div class="kpi-value" id="kpiCosts">0 ₪</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">שולי רווח (Margin)</div>
+                <div class="kpi-value" id="kpiMargin">0%</div>
+            </div>
+        </div>
+
+        <!-- 1. השוואת ערוצים -->
+        <div class="section-title">🏢 פילוח ערוצי מכירה (חנות מול אונליין)</div>
+        <div class="table-card">
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ערוץ</th>
+                            <th>עסקאות</th>
+                            <th>מחזור (₪)</th>
+                            <th>עלות סחורה</th>
+                            <th>דמי משלוח</th>
+                            <th>רווח גולמי</th>
+                            <th>מרווח %</th>
+                            <th>ממוצע לעסקה</th>
+                        </tr>
+                    </thead>
+                    <tbody id="channelsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 2. ביצועי קמפיינים -->
+        <div class="section-title">🎯 ביצועי קמפיינים והחזר השקעה (ROAS & Marketing ROI)</div>
+        <div class="table-card">
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>שם קמפיין</th>
+                            <th>הזמנות</th>
+                            <th>הכנסות (₪)</th>
+                            <th>רווח גולמי</th>
+                            <th>הושקע בפרסום</th>
+                            <th>ROAS</th>
+                            <th>רווח נקי לאחר פרסום</th>
+                        </tr>
+                    </thead>
+                    <tbody id="campaignsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 3. מטריצת מוצרים -->
+        <div class="section-title">📦 מטריצת מוצרים (מנועי רווח מובילים)</div>
+        <div class="table-card">
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>שם מוצר</th>
+                            <th>יחידות שנמכרו</th>
+                            <th>מחזור מכירות</th>
+                            <th>סך רווח נקי</th>
+                            <th>שולי רווח %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadReport() {
+            const period = document.getElementById('periodFilter').value;
+            const url = period ? `/api/analytics?period=${period}` : '/api/analytics';
+            
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                document.getElementById('kpiNetProfit').innerText = data.summary.net_profit.toLocaleString() + ' ₪';
+                document.getElementById('kpiRevenue').innerText = data.summary.revenue.toLocaleString() + ' ₪';
+                document.getElementById('kpiCosts').innerText = (data.summary.cogs + data.summary.shipping).toLocaleString() + ' ₪';
+                document.getElementById('kpiMargin').innerText = data.summary.margin_pct + '%';
+
+                const aiBox = document.getElementById('aiDirectivesList');
+                aiBox.innerHTML = '';
+                data.ai_directives.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'ai-item';
+                    div.innerHTML = item;
+                    aiBox.appendChild(div);
+                });
+
+                const chBody = document.getElementById('channelsTableBody');
+                chBody.innerHTML = '';
+                if (!data.channel_comparison || data.channel_comparison.length === 0) {
+                    chBody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#64748b;">אין עסקאות בתקופה זו</td></tr>';
+                } else {
+                    data.channel_comparison.forEach(c => {
+                        chBody.innerHTML += `
+                            <tr>
+                                <td style="font-weight:bold;">${c.name}</td>
+                                <td>${c.orders}</td>
+                                <td>${c.rev.toLocaleString()} ₪</td>
+                                <td style="color:#94a3b8;">${c.cogs.toLocaleString()} ₪</td>
+                                <td style="color:#94a3b8;">${c.ship.toLocaleString()} ₪</td>
+                                <td style="color:#4ade80; font-weight:bold;">+${c.profit.toLocaleString()} ₪</td>
+                                <td><strong>${c.margin_pct}%</strong></td>
+                                <td>${c.avg_ticket.toLocaleString()} ₪</td>
+                            </tr>
+                        `;
+                    });
+                }
+
+                const campBody = document.getElementById('campaignsTableBody');
+                campBody.innerHTML = '';
+                if (!data.campaign_performance || data.campaign_performance.length === 0) {
+                    campBody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b;">אין נתוני קמפיינים לתקופה זו</td></tr>';
+                } else {
+                    data.campaign_performance.forEach(c => {
+                        const roasBadge = c.roas >= 2.5 ? `<span class="badge badge-roas">פי ${c.roas}</span>` : `<span class="badge badge-low">פי ${c.roas}</span>`;
+                        campBody.innerHTML += `
+                            <tr>
+                                <td style="font-weight:bold; color:#38bdf8;">${c.campaign}</td>
+                                <td>${c.orders}</td>
+                                <td>${c.revenue.toLocaleString()} ₪</td>
+                                <td>+${c.gross_profit.toLocaleString()} ₪</td>
+                                <td style="color:#f87171;">${c.ad_spend.toLocaleString()} ₪</td>
+                                <td>${c.ad_spend > 0 ? roasBadge : '-'}</td>
+                                <td style="font-weight:bold; color:${c.net_profit >= 0 ? '#4ade80' : '#f87171'}">${c.net_profit.toLocaleString()} ₪</td>
+                            </tr>
+                        `;
+                    });
+                }
+
+                const prodBody = document.getElementById('productsTableBody');
+                prodBody.innerHTML = '';
+                if (!data.product_matrix || data.product_matrix.length === 0) {
+                    prodBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b;">אין מוצרים שנמכרו בתקופה זו</td></tr>';
+                } else {
+                    data.product_matrix.forEach(p => {
+                        prodBody.innerHTML += `
+                            <tr>
+                                <td style="font-weight:bold;">${p.name}</td>
+                                <td>${p.units}</td>
+                                <td>${p.revenue.toLocaleString()} ₪</td>
+                                <td style="color:#4ade80; font-weight:bold;">+${p.profit.toLocaleString()} ₪</td>
+                                <td>${p.margin}%</td>
+                            </tr>
+                        `;
+                    });
+                }
+
+            } catch (err) {
+                console.error("Error loading analytics:", err);
+            }
+        }
+
+        async function sendTelegramNow() {
+            const period = document.getElementById('periodFilter').value;
+            const url = period ? `/api/send_telegram_report?period=${period}` : '/api/send_telegram_report';
+            
+            try {
+                const res = await fetch(url, { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.details) {
+                    let reportMsg = "תוצאות שליחת הדוח לטלגרם:\n\n";
+                    data.details.forEach(item => {
+                        reportMsg += `• ${item.name} (${item.id}): ${item.status}\n`;
+                    });
+                    alert(reportMsg);
+                } else {
+                    alert("הדוח נשלח בהצלחה!");
+                }
+            } catch (e) {
+                alert("שגיאת רשת בשליחה לטלגרם.");
+            }
+        }
+
+        async function resetAllTestData() {
+            const confirmAction = confirm("⚠️ אזהרה: פעולה זו תמחק את כל עסקאות הבדיקה גם מהדאשבורד וגם מ-Google Sheets כדי להתחיל מאפס.\n\nהאם להמשיך באיפוס?");
+            if (!confirmAction) return;
+
+            try {
+                const res = await fetch('/api/reset_test_data', { method: 'POST' });
+                if (res.ok) {
+                    alert("כל נתוני הבדיקה אופסו בהצלחה! המערכת נקייה ומוכנה לעבודה.");
+                    loadReport();
+                } else {
+                    alert("שגיאה באיפוס הנתונים.");
+                }
+            } catch (e) {
+                alert("שגיאת תקשורת באיפוס.");
+            }
+        }
+
+        async function openSpendModal() {
+            const period = document.getElementById('periodFilter').value || "2026-08";
+            const month = prompt("חודש ההוצאה (YYYY-MM):", period.includes("-Q") ? "2026-08" : period);
+            if (!month) return;
+            const campaign = prompt("שם הקמפיין (למשל: meta_diamond / tiktok_sale):", "meta_diamond");
+            if (!campaign) return;
+            const spend = prompt("סכום ההוצאה בפרסום (₪):", "1200");
+            if (!spend || isNaN(spend)) return;
+
+            try {
+                const res = await fetch('/api/campaign_spend', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ month: month, campaign_name: campaign, spend: parseFloat(spend) })
+                });
+                if (res.ok) {
+                    alert("ההוצאה נרשמה בהצלחה!");
+                    loadReport();
+                } else {
+                    alert("שגיאה ברישום.");
+                }
+            } catch(e) {
+                alert("שגיאת רשת.");
+            }
+        }
+
+        loadReport();
+    </script>
+</body>
+</html>

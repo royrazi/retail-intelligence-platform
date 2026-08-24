@@ -1,0 +1,16 @@
+google_credentials.json
+.env
+
+retail_sales.db
+*.db
+*.sqlite3
+
+__pycache__/
+*.pyc
+
+venv/
+.venv/
+env/
+
+.vscode/
+.DS_Store
