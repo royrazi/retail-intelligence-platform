@@ -1,155 +1,178 @@
 import os
-import secrets
-from fastapi import FastAPI, HTTPException, Query, Depends, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.middleware.cors import CORSMiddleware
+import sys
+import sqlite3
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel
-from typing import Optional
-from apscheduler.schedulers.background import BackgroundScheduler
+from fastapi.responses import FileResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from datetime import datetime
-import database
-import sheets_service
-import analytics_engine
-import telegram_service
+from apscheduler.schedulers.background import BackgroundScheduler
 
-database.init_db()
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    pass
 
-app = FastAPI(title="Smart Retail & Fulfillment Engine")
+from database import init_db, insert_sale
+from analytics_engine import get_analytics, normalize_channel
+from sheets_service import append_sale_to_sheet, sync_sheets_to_db, get_sheets_client, SPREADSHEET_NAME, SHEET_HEADERS
+from telegram_service import send_telegram_monthly_report
 
+app = FastAPI(title="Smart Retail Engine")
 security = HTTPBasic()
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "secret")
 
-def authenticate_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
-    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
-    if not (correct_username and correct_password):
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Fail-Fast Security Logic
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+    print("CRITICAL SECURITY ERROR: ADMIN_USERNAME or ADMIN_PASSWORD missing from .env!")
+    print("Fail-Fast: Shutting down the server to prevent unauthorized access.")
+    sys.exit(1)
+
+def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
+    if credentials.username != ADMIN_USERNAME or credentials.password != ADMIN_PASSWORD:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized",
+            detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-NO_CACHE_HEADERS = {
-    "Cache-Control": "no-cache, no-store, must-revalidate",
-    "Pragma": "no-cache",
-    "Expires": "0"
-}
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-def monthly_cron_job():
+@app.on_event("startup")
+def on_startup():
+    init_db()
     try:
-        now = datetime.now()
-        prev_month_str = f"{now.year}-{now.month-1:02d}" if now.month > 1 else f"{now.year-1}-12"
-        telegram_service.send_telegram_report(target_month=prev_month_str)
+        sync_sheets_to_db()
     except Exception as e:
-        print(f"[Cron Error]: {e}")
+        print(f"Startup Google Sheets sync error: {e}")
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(monthly_cron_job, 'cron', day=1, hour=9, minute=0)
-scheduler.start()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(send_telegram_monthly_report, 'cron', day=1, hour=9, minute=0)
+    scheduler.start()
 
-class SaleCreate(BaseModel):
-    channel: str
-    item_name: str
-    category: Optional[str] = None
-    sale_price: float
-    cost_price: float = 250.0
-    shipping_cost: float = 0.0
-    payment_method: Optional[str] = "bit"
-    customer_city: Optional[str] = ""
-    campaign_tag: Optional[str] = "none"
+@app.api_route("/", methods=["GET", "HEAD"])
+def root_health():
+    return {"status": "ok", "service": "smart-retail-engine"}
 
-class CampaignSpendCreate(BaseModel):
-    month: str
-    campaign_name: str
-    spend: float
-    notes: Optional[str] = ""
+@app.api_route("/store", methods=["GET", "HEAD"])
+def get_store_page():
+    return FileResponse("static/store.html")
 
-@app.get("/online")
-def get_online_ui():
-    return FileResponse("static/online.html", headers=NO_CACHE_HEADERS)
+@app.api_route("/online", methods=["GET", "HEAD"])
+def get_online_page():
+    return FileResponse("static/online.html")
 
-@app.get("/store")
-def get_store_ui():
-    return FileResponse("static/store.html", headers=NO_CACHE_HEADERS)
+@app.api_route("/dashboard", methods=["GET", "HEAD"])
+def get_dashboard_page(user: str = Depends(authenticate)):
+    return FileResponse("static/dashboard.html")
 
-@app.get("/dashboard")
-def get_dashboard_ui(username: str = Depends(authenticate_admin)):
-    return FileResponse("static/dashboard.html", headers=NO_CACHE_HEADERS)
-
-@app.get("/")
-def home(username: str = Depends(authenticate_admin)):
-    return FileResponse("static/dashboard.html", headers=NO_CACHE_HEADERS)
-
-@app.get("/reset")
-def direct_reset_page(username: str = Depends(authenticate_admin)):
+@app.post("/api/sales")
+async def create_sale(request: Request):
     try:
-        database.clear_all_sales()
-        sheets_service.clear_all_sales_sheet()
-        return HTMLResponse(
-            """
-            <html dir='rtl' style='background:#0b1329; color:white; font-family:sans-serif; text-align:center; padding:50px;'>
-                <h1 style='color:#4ade80;'>כל נתוני הבדיקה נמחקו בהצלחה</h1>
-                <p style='color:#94a3b8;'>מסד הנתונים ו-Google Sheets אופסו ל-0 עסקאות.</p>
-                <br>
-                <a href='/dashboard' style='display:inline-block; background:#0284c7; color:white; padding:12px 24px; text-decoration:none; border-radius:8px; font-weight:bold;'>חזור לדאשבורד</a>
-            </html>
-            """
-        )
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    try:
+        tz = ZoneInfo("Asia/Jerusalem")
+    except:
+        tz = None
+    now_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+    
+    raw_channel = data.get("channel", "חנות")
+    channel_heb = normalize_channel(raw_channel)
+    
+    prod_name = (
+        data.get("item_name") or 
+        data.get("product_name") or 
+        data.get("product") or 
+        data.get("item") or 
+        "פריט כללי"
+    )
+    
+    def parse_float(val):
+        try:
+            if val is None or str(val).strip() == "":
+                return 0.0
+            return float(val)
+        except (ValueError, TypeError):
+            return 0.0
+
+    s_price = parse_float(data.get("sale_price") or data.get("selling_price") or data.get("price"))
+    c_price = parse_float(data.get("cost_price") or data.get("cost"))
+    d_fee = parse_float(data.get("shipping_cost") or data.get("delivery_fee") or data.get("delivery"))
+    a_spend = parse_float(data.get("ad_spend") or data.get("ads"))
+    cat = str(data.get("category") or "כללי")
+
+    city_val = str(data.get("customer_city") or data.get("city") or data.get("notes") or "-")
+    if not city_val.strip():
+        city_val = "-"
+
+    net_profit = s_price - (c_price + d_fee + a_spend)
+    margin = (net_profit / s_price * 100) if s_price > 0 else 0.0
+
+    sale_record = {
+        "timestamp": now_str,
+        "channel": channel_heb,
+        "product_name": prod_name,
+        "item_name": prod_name,
+        "product": prod_name,
+        "category": cat,
+        "cost_price": c_price,
+        "cost": c_price,
+        "delivery_fee": d_fee,
+        "shipping_cost": d_fee,
+        "selling_price": s_price,
+        "sale_price": s_price,
+        "ad_spend": a_spend,
+        "margin": margin,
+        "net_profit": net_profit,
+        "payment_method": str(data.get("payment_method", "-")),
+        "city": city_val,
+        "customer_city": city_val,
+        "notes": city_val,
+        "campaign_tag": str(data.get("campaign_tag", "none"))
+    }
+
+    sale_id = insert_sale(sale_record)
+    sale_record["id"] = sale_id
+    sale_record["month"] = now_str[:7]
+
+    try:
+        append_sale_to_sheet(sale_record)
     except Exception as e:
-        return HTMLResponse(f"<h3>Error resetting: {e}</h3>", status_code=500)
+        print(f"Sheet append error: {e}")
+
+    return {"status": "success", "sale_id": sale_id}
 
 @app.get("/api/analytics")
-def get_analytics(period: Optional[str] = Query(None), username: str = Depends(authenticate_admin)):
-    return analytics_engine.generate_analytics_report(period=period)
+def get_analytics_data(period: str = None, start_date: str = None, end_date: str = None, user: str = Depends(authenticate)):
+    return get_analytics(period=period, start_date=start_date, end_date=end_date)
 
-@app.post("/api/campaign_spend")
-def record_campaign_spend(spend: CampaignSpendCreate, username: str = Depends(authenticate_admin)):
-    ok = sheets_service.add_campaign_spend(spend.month, spend.campaign_name, spend.spend, spend.notes)
-    if not ok:
-        raise HTTPException(status_code=500, detail="Failed to log campaign spend")
-    return {"success": True}
+@app.post("/api/test-telegram")
+def test_telegram(user: str = Depends(authenticate)):
+    send_telegram_monthly_report()
+    return {"status": "Report sent"}
 
-@app.post("/api/reset_test_data")
-def reset_test_data(username: str = Depends(authenticate_admin)):
+@app.post("/api/reset")
+def reset_system(user: str = Depends(authenticate)):
+    conn = sqlite3.connect("retail_sales.db", timeout=30.0)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("DELETE FROM sales;")
+    conn.commit()
+    conn.close()
+
     try:
-        database.clear_all_sales()
-        sheets_service.clear_all_sales_sheet()
-        return {"success": True, "message": "All test data successfully cleared"}
+        client = get_sheets_client()
+        if client:
+            sheet = client.open(SPREADSHEET_NAME).sheet1
+            sheet.clear()
+            sheet.append_row(SHEET_HEADERS)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Sheet reset error: {e}")
 
-@app.get("/test-telegram")
-@app.post("/api/send_telegram_report")
-def trigger_telegram(period: Optional[str] = Query(None), username: str = Depends(authenticate_admin)):
-    return telegram_service.send_telegram_report(target_month=period)
-
-@app.post("/api/sales", status_code=201)
-def create_sale(sale: SaleCreate):
-    try:
-        saved_sale = database.insert_sale(sale.dict())
-        try:
-            sheets_service.append_sale_to_sheets(sale.dict())
-        except Exception as s_err:
-            print(f"[Sheets Sync Warning]: {s_err}")
-        return {"success": True, "data": saved_sale}
-    except Exception as e:
-        print(f"[Create Sale Error]: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/sales")
-def get_sales(username: str = Depends(authenticate_admin)):
-    return database.fetch_all_sales()
+    return {"status": "success", "message": "All data cleared successfully"}
