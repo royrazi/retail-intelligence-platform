@@ -1,10 +1,12 @@
 import os
-import sys
+import sys  
 import sqlite3
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
